@@ -60,9 +60,9 @@ jobs:
           # save raw response for inspection
           printf "%s" "$response" > linkup_response.json || true
 
-          # expose response as a single-line step output (compact JSON)
-          COMPACT_RESPONSE=$(jq -c '.' linkup_response.json 2>/dev/null || echo '{}')
-          # remove newlines just in case and write as a simple output assignment
+          # truncate results to MAX_RESULTS and expose compact JSON as step output
+          COMPACT_RESPONSE=$(jq -c --argjson max $MAX_RESULTS '.results = (.results | .[0:$max]) | .' linkup_response.json 2>/dev/null || echo '{}')
+          # ensure single-line before writing to GITHUB_OUTPUT
           COMPACT_RESPONSE=$(echo "$COMPACT_RESPONSE" | tr -d '\n')
           echo "linkup_response=$COMPACT_RESPONSE" >> $GITHUB_OUTPUT || true
           echo "WROTE_GITHUB_OUTPUT=1"
@@ -99,9 +99,21 @@ jobs:
 
       - name: Save AI summary to file
         if: always()
-        run: |
-          echo "${{ steps.summarize.outputs.response }}" > linkup_summary.json || true
-          jq . linkup_summary.json || true
+        uses: actions/github-script@v6
+        env:
+          AI_RESPONSE: ${{ steps.summarize.outputs.response }}
+        with:
+          script: |
+            const fs = require('fs');
+            const resp = process.env.AI_RESPONSE || '';
+            try {
+              const obj = JSON.parse(resp);
+              fs.writeFileSync('linkup_summary.json', JSON.stringify(obj, null, 2));
+            } catch (e) {
+              // fallback: write raw response
+              fs.writeFileSync('linkup_summary.json', resp);
+            }
+            console.log('Saved linkup_summary.json');
 
       - name: Upload artifacts (response + summary)
         uses: actions/upload-artifact@v4
