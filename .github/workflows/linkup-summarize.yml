@@ -1,0 +1,110 @@
+name: LinkUp — search & summarize
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Topic to search with LinkUp'
+        required: true
+        default: 'OpenAI'
+      depth:
+        description: 'Search depth (standard | deep)'
+        required: false
+        default: 'standard'
+      max_results:
+        description: 'Maximum number of results to include (used only for truncation)'
+        required: false
+        default: '10'
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  search-and-summarize:
+    name: Search LinkUp and summarize with GPT-4.1
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      models: read
+
+    outputs:
+      ai_summary: ${{ steps.summarize.outputs.response }}
+
+    steps:
+      - name: Prepare inputs
+        run: |
+          echo "TOPIC=${{ github.event.inputs.topic }}" >> $GITHUB_ENV
+          echo "DEPTH=${{ github.event.inputs.depth }}" >> $GITHUB_ENV
+          echo "MAX_RESULTS=${{ github.event.inputs.max_results }}" >> $GITHUB_ENV
+
+      - name: Call LinkUp Search API
+        id: linkup_search
+        env:
+          LINKUP_API_KEY: ${{ secrets.LINKUP_API_KEY }}
+          TOPIC: ${{ github.event.inputs.topic }}
+          DEPTH: ${{ github.event.inputs.depth }}
+        run: |
+          if [ -z "${LINKUP_API_KEY}" ]; then
+            echo "ERROR: Set repository secret LINKUP_API_KEY before running this workflow." >&2
+            exit 1
+          fi
+
+          body=$(jq -n --arg q "$TOPIC" --arg depth "$DEPTH" '{q:$q, depth:$depth, outputType:"searchResults", includeImages:false}')
+
+          response=$(curl -sS -X POST "https://api.linkup.so/v1/search" \
+            -H "Authorization: Bearer ${LINKUP_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$body") || true
+
+          # save raw response for inspection
+          printf "%s" "$response" > linkup_response.json || true
+
+          # expose response as a step output (safe for non-secret data)
+          echo "linkup_response<<'JSON'" >> $GITHUB_OUTPUT
+          cat linkup_response.json >> $GITHUB_OUTPUT
+          echo "JSON" >> $GITHUB_OUTPUT
+
+      - name: Summarize results with AI (gpt-4.1)
+        id: summarize
+        uses: actions/ai-inference@a380166897b5408b8fb7dddd148142794cb5624a # v2.0.6
+        with:
+          model: openai/gpt-4.1
+          system-prompt: |
+            You are a concise, factual summarizer. Given a set of web search results (title, url and short content), produce a short, structured summary.
+
+            Output format (JSON only):
+            {
+              "summary": "<2-3 sentence summary>",
+              "top_results": [ { "url":"...", "title":"...", "one_line":"..." } ],
+              "suggested_tags": ["tag1","tag2"],
+              "raw_results_count": 0
+            }
+
+            Be concise, factual, and return valid JSON only.
+          prompt: |
+            Here are the LinkUp search results for the topic: "${{ github.event.inputs.topic }}".
+
+            LinkUp JSON (only the `results` array):
+            ${{ steps.linkup_search.outputs.linkup_response }}
+
+            Instructions:
+            - Produce a JSON object (exactly following the schema above).
+            - Include up to 5 `top_results` with 1-line summaries.
+            - `raw_results_count` should reflect the number of items in the `results` array.
+            - If there are no meaningful results, return an empty `top_results` array and an honest short summary.
+          max-tokens: 600
+
+      - name: Save AI summary to file
+        if: always()
+        run: |
+          echo "${{ steps.summarize.outputs.response }}" > linkup_summary.json || true
+          jq . linkup_summary.json || true
+
+      - name: Upload artifacts (response + summary)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linkup-search-and-summary
+          path: |
+            linkup_response.json
+            linkup_summary.json
