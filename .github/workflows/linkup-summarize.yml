@@ -61,7 +61,7 @@ jobs:
           printf "%s" "$response" > linkup_response.json || true
 
           # expose response as a step output (safe for non-secret data)
-          echo "linkup_response<<'JSON'" >> $GITHUB_OUTPUT
+          echo "linkup_response<<JSON" >> $GITHUB_OUTPUT
           cat linkup_response.json >> $GITHUB_OUTPUT
           echo "JSON" >> $GITHUB_OUTPUT
 
