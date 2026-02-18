@@ -1,6 +1,8 @@
 name: LinkUp — search & summarize
 
 on:
+  schedule:
+    - cron: '30 18 * * *'   # daily at 18:30 UTC
   workflow_dispatch:
     inputs:
       topic:
