@@ -60,22 +60,12 @@ jobs:
           # save raw response for inspection
           printf "%s" "$response" > linkup_response.json || true
 
-          # expose response as a step output (safe for non-secret data)
-          # use a unique delimiter so the content can't accidentally close the here-doc
-          DELIM="END_LINKUP_RESPONSE_$(date +%s)"
-          echo "linkup_response<<${DELIM}" >> $GITHUB_OUTPUT || true
-
-          if [ -s linkup_response.json ]; then
-            # append the JSON body (guarded so a failing cat won't stop the step)
-            cat linkup_response.json >> $GITHUB_OUTPUT || true
-          else
-            # ensure the output always contains valid JSON
-            echo "{}" >> $GITHUB_OUTPUT || true
-          fi
-
-          # close the here-doc with the same unique delimiter
-          echo "${DELIM}" >> $GITHUB_OUTPUT || true
-          echo "WROTE_GITHUB_OUTPUT_DELIM=${DELIM}"
+          # expose response as a single-line step output (compact JSON)
+          COMPACT_RESPONSE=$(jq -c '.' linkup_response.json 2>/dev/null || echo '{}')
+          # remove newlines just in case and write as a simple output assignment
+          COMPACT_RESPONSE=$(echo "$COMPACT_RESPONSE" | tr -d '\n')
+          echo "linkup_response=$COMPACT_RESPONSE" >> $GITHUB_OUTPUT || true
+          echo "WROTE_GITHUB_OUTPUT=1"
 
       - name: Summarize results with AI (gpt-4.1)
         id: summarize
